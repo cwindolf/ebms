@@ -20,7 +20,7 @@ def _download_mnist():
     if not os.path.isdir(DATA_PATH):
         os.mkdir(DATA_PATH)
 
-    urllib.request.urlretrieve(MNIST_TRAIN_IMG, '/.tmp.gz')
+    urllib.request.urlretrieve(MNIST_TRAIN_IMG, DATA_PATH + '/.tmp.gz')
     with gzip.open(DATA_PATH + '/.tmp.gz', 'rb') as image_data:
         image_data.read(16)
         images = np.empty((60000, 784), dtype=np.float32)
