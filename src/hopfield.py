@@ -1,7 +1,14 @@
 '''
 This is a Numpy implementation of the network described in Hopfield's 1982
-paper titled `Neural networks and physical systems with emergent collective
-computational abilities`.
+paper titled "Neural networks and physical systems with emergent collective
+computational abilities".
+
+This network is structured as a content-addressible memory, and so its "API"
+was not what I, at least, was used to. I.e., it does not directly attempt to
+approximate a function between two Euclidean spaces. More interestingly, it
+differs from the interface of the Boltzmann machine, even though the Boltzmann
+machine is in some ways the `stochastic version` of this net. Anyway, maybe
+they can be made compatible, I'm not sure.
 '''
 import numpy as np
 from itertools import product
@@ -9,51 +16,63 @@ from itertools import product
 
 class HopfieldNet:
 
-    def __init__(self, S):
+    def __init__(self, V):
         '''
         Initialize a new Hopfield net, using Hopfield's information storage
-        algorithm to compute the necessary weights for storing `S` in
+        algorithm to compute the necessary weights for storing `V` in
         memory.
 
         Note we are taking the biases to be 0 like Hopfield did.
 
-        @param  S  List-like of 1-d np.arrays
+        @param  V  List-like of 1-d np.arrays
         '''
         # dumb check.
-        S = np.asarray(S)
-        assert len(S.shape) == 2
+        V = np.asarray(V)
+        assert len(V.shape) == 2
 
         # init weights
-        self.n = S[0].shape[0]
-        self.V = np.zeros(self.n).astype(np.float64)
-        self._V = np.zeros(self.n).astype(np.float64)
+        self.n = V[0].shape[0]
         self.T = np.zeros((self.n, self.n)).astype(np.float64)
 
-        # train
+        # Some buffers for the current state of the net, and for scratch
+        self.X = np.zeros(self.n).astype(np.float64)
+        self._X = np.zeros(self.n).astype(np.float64)
+
+        # train. Hopfield's rule
+        # $T_{i,j} = \sum_s (2 V^s_i - 1)(2 V^s_j - 1)$
         for i in range(self.n):
             for j in range(self.n):
-                self.T[i, j] = sum((2. * S[s, i] - 1.) * (2. * S[s, j] - 1.)
-                                   for s in range(S.shape[0]))
+                self.T[i, j] = sum((2. * V[s, i] - 1.) * (2. * V[s, j] - 1.)
+                                   for s in range(V.shape[0]))
 
-    def sample(self, x, max_iters=1000):
+    def sample(self, x, max_iters=100):
         '''
         Iterate on input `x` until convergence or `max_iters`.
+        Each step, we go through all of the states in a (new) random order,
+        and update them according to the rule
+        $X_i=\operatorname{ciel}(\operatorname{relu}(\sum_{j=1}^n T_{ij} X_j))$
+        where $n$ is the number of nodes, and this mess of ciels and relus is
+        just meant to say that if $W_i\dot X > 0$, the result is 1, and 0
+        otherwise.
+
+        @param x            np.array    the input at which to start iterating
+        @param max_iters    int         if we don't converge, when to stop?
         '''
-        self.V[:] = x
-        self._V[:] = x
+        self.X[:] = x
+        self._X[:] = x
         order = list(range(self.n))
         for _ in range(max_iters):
-            self._V = self.V
+            self._X[:] = self.X
             np.random.shuffle(order)
             for i in order:
-                s = sum(self.T[i, j] * self.V[j] for j in range(self.n))
+                s = sum(self.T[i, j] * self.X[j] for j in range(self.n))
                 if s >= 0:
-                    self.V[i] = 1.
+                    self.X[i] = 1.
                 else:
-                    self.V[i] = 0.
-            if (self.V == self._V).all():
+                    self.X[i] = 0.
+            if (self.X == self._X).all():
                 break
-        return self.V
+        return self.X
 
 
 # *************************************************************************** #
