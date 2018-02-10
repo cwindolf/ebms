@@ -20,6 +20,8 @@ To toggle between these two APIs, look for `clamp_indices` arguments to
 sampling functions. The visible units at these indices will be held fixed.
 '''
 import numpy as np
+import os.path
+from tqdm import tqdm
 
 
 class BoltzmannMachine:
@@ -54,6 +56,7 @@ class BoltzmannMachine:
         # Implementation details.
         self.cache = np.zeros_like(self.units)
         self.hidden_inds = list(range(self.n_h))
+        self.all_inds = list(range(self.n_h + self.n_v))
 
 
 
@@ -140,8 +143,8 @@ class BoltzmannMachine:
         self.units[update_inds] = activations[update_inds]
 
 
-    def boltzmann_sampling(self, x, clamp_indices=(), N=100,
-                           betas=BoltzmannMachine.default_annealing_schedule):
+    def boltzmann_sampling(self, x=None, clamp_indices=(), N=100,
+                           betas=None):
         '''
         Metropolis-style sampling algorithm with annealing as described in
         section 2.2. This does not enforce any kind of restricted structure.
@@ -159,12 +162,18 @@ class BoltzmannMachine:
             function int -> iterable of inverse temperatures
             the annealing schedule.
         '''
-        # Start hidden units with Bernoulli IC. Shouldn't matter for suitable
-        # annealing schedule.
-        self.h[:] = np.random.binomial(1, 0.5, self.n_h)
+        # Set visible units to input x if present, and set
+        # other units with Bernoulli IC. Shouldn't matter for suitable
+        # annealing schedule, since infinite temperature gives uniform distro.
+        if x:
+            self.v[:] = x
+            self.h[:] = np.random.binomial(1, 0.5, self.n_h)
+        else:
+            self.units[:-1] = np.random.binomial(1, 0.5, self.n_h + self.n_v)
 
-        # Set visible units to input x
-        self.v[:] = x
+        # Annealing sched
+        if not betas:
+            betas = BoltzmannMachine.default_annealing_schedule
 
         # As above...
         update_inds = list(j for j in range(self.n_h + self.n_v)
@@ -177,32 +186,70 @@ class BoltzmannMachine:
         # That's it!
         return self.v
 
-
-    def train(self, X, epochs, chains=5, burn_in=5):
-        '''
-        We implement an extrapolation of the algorithm described in section
-        3 of the paper. This is similar to contrastive divergence, but not
-        really the same I don't think? Hmm.
-
-        '''
+    def train_gen(self, X, epochs, chains=5, burn_in=5, lr=0.5, save_dir=None,
+                  name='boltzmann'):
         for e in range(epochs):
+            print('epoch', e)
             # We do annealing in the learning rate per the authors.
-            epsilon = epochs / e
+            epsilon = lr * epochs / (e + 1)
+            print(epsilon)
 
             # Approximate $p_{ij}$ using `chains` different chains at each
-            # example x to sample these mean probabilities. Recall that if $y$
-            # indexes over possible hidden states,
+            # example x to sample these mean probabilities.
+            # "It's just Monte Carlo"^{TM}
+            # Recall that if $y$ indexes over possible hidden states,
             # $p_{ij} = \sum_{x,y} P(x, y) S^{x,y}_i S^{x,y}_j$,
             # where the $S$ terms give states of units at $x$ and $y$.
             np.random.shuffle(X)
-            pij = 0.0
-            for x in X:
-                for chain in chains:
+            for x in tqdm(X, mininterval=1):
+                # These store the main ingredients for computing weight updates
+                # Look at the appendix of the paper to see definitions. They
+                # are called $p_{ij}$ and $p_{ij}'$ in there.
+                p_clamped = np.zeros_like(self.W)
+                p_free = np.zeros_like(self.W)
+
+                # Run the model clamped to x a bunch of times. Doing some
+                # extra annealing here to shake up the chain between
+                # observations, but not sure if that's advisable, or what
+                # sort of schedule is best for that.
+                for _ in range(chains):
                     self.v[:] = x
                     for b in range(burn_in):
                         beta = epsilon + burn_in - b
                         self._boltzmann_update(beta, self.hidden_inds)
                     for b in range(burn_in):
                         self._boltzmann_update(epsilon, self.hidden_inds)
+                    p_clamped += np.outer(self.units, self.units)[:-1,:]
+                p_clamped /= chains
 
-                    pij += 
+                # Same but running free.
+                for _ in range(chains):
+                    self.v[:] = x
+                    for b in range(burn_in):
+                        beta = epsilon + burn_in - b
+                        self._boltzmann_update(beta, self.all_inds)
+                    for b in range(burn_in):
+                        self._boltzmann_update(epsilon, self.all_inds)
+                    p_free += np.outer(self.units, self.units)[:-1,:]
+                p_free /= chains
+
+                # Do the update for this example
+                self.W += epsilon * (p_clamped - p_free)
+
+            # Save this epoch's new weights.
+            if save_dir:
+                np.savez_compressed(os.path.join(save_dir, name + '.npz'))
+            yield e
+
+
+    def train(self, X, epochs, chains=5, burn_in=5, lr=0.5, save_dir=None,
+              name='boltzmann'):
+        '''
+        We implement an extrapolation of the algorithm described in section
+        3 of the paper. This is similar to contrastive divergence, but not
+        really the same I don't think? Hmm.
+
+        '''
+        for _ in self.train_gen(X, epochs, chains, burn_in, lr, save_dir, name):
+            pass
+
