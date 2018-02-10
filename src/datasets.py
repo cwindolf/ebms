@@ -1,13 +1,17 @@
 import os
-import urllib
+import urllib.request
 import gzip
 import struct
 import numpy as np
 from scipy.misc import imresize
+from scipy.io import loadmat
 
-
+# Where does mnist live
 MNIST_TRAIN_IMG = 'http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz'
 MNIST_TRAIN_LAB = 'http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz'
+
+# Where does Caltech101Sillhou live
+CTECH_MAT = 'http://people.cs.umass.edu/~marlin/data/caltech101_silhouettes_28.mat'
 
 # Some .npz files will be stored here! Watch out...
 DATA_PATH = os.path.expanduser('~/data')
@@ -40,6 +44,23 @@ def _download_mnist():
     np.savez_compressed(DATA_PATH + '/mnist.npz', i=images, l=labels)
 
 
+def _download_caltech():
+    '''
+    Don't call this, caltech functions will do it. "Just a cache."
+    '''
+    if not os.path.isdir(DATA_PATH):
+        os.mkdir(DATA_PATH)
+
+    urllib.request.urlretrieve(CTECH_MAT, DATA_PATH + '/ctech28.mat')
+    mat = loadmat(DATA_PATH + '/ctech28.mat')
+    images = mat['X']
+    int_labels = mat['Y'][0]
+    labels_dict = {i + 1: lab[0] for i, lab in enumerate(mat['classnames'][0])}
+    np.savez_compressed(DATA_PATH + '/caltech.npz',
+                        i=images, l=int_labels, d=labels_dict)
+    os.remove(DATA_PATH + '/ctech28.mat')
+
+
 def mnist(label, img_height=28, not_mod=1):
     '''
     Make a generator yielding all of the images in the
@@ -64,3 +85,24 @@ def mnist(label, img_height=28, not_mod=1):
 def mnist_class(class_num, extra='', img_height=28, not_mod=1):
     np.savez_compressed(DATA_PATH + '/mnist%d%s.npz' % (class_num, extra),
         np.asarray(list(mnist(class_num, img_height=img_height))))
+
+
+def caltech(int_label=False, string_label=False):
+    '''
+    Produce a generator running through all the images in the Caltech 101
+    Silhouettes datasets. Generator will yield the requested labels in
+    that order.
+    '''
+    if not os.path.isdir(DATA_PATH) or not os.path.isfile(DATA_PATH + '/caltech.npz'):
+        _download_caltech()
+    dat = np.load(DATA_PATH + '/caltech.npz')
+    ims, ils, key = dat['i'], dat['l'], dat['d']
+    for i, l in zip(ims, ils):
+        if int_label and string_label:
+            yield i, l, key[l]
+        elif int_label:
+            yield i, l
+        elif string_label:
+            yield i, key[l]
+        else:
+            yield i
