@@ -79,6 +79,15 @@ class DeepBeliefNet:
             self.gibbs_in(k, beta)
 
 
+    def backward_pass(self, beta):
+        '''
+        Use the deep hidden state of the net to propagate through alll of the
+        layers and eventually get a new visible state. Useful for sampling.
+        '''
+        for k in reversed(range(0, len(self.dims) - 1)):
+            self.gibbs_out(k, beta)
+
+
     def train_layer(self, X, k, beta, learning_rate=0.1):
         '''
         One training epoch for just the weights between the `k-1`th layer and
