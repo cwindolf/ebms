@@ -25,7 +25,7 @@ class DeepBeliefNet:
         # Store dimensions
         self.dims = dims
         self.num_visible, self.hidden_dims = dims
-        
+
         # Model state
         self.units = [np.zeros(d) for d in dims]
         # We need fresh biases for each part of the stack.
@@ -93,7 +93,7 @@ class DeepBeliefNet:
         One training epoch for just the weights between the `k-1`th layer and
         the `k`th layer, where the 0th layer is the visible one, on input `X`
         (a list-like of training examples).
-        
+
         This just does one loop over `X`, doing a single step of contrastive
         divergence training `for x in X`. Call it a few times if you want.
 
@@ -108,6 +108,8 @@ class DeepBeliefNet:
         sj1 = np.empty_like(self.unit[k])
         sisj0 = np.empty_like(self.weights[k - 1])
         sisj1 = np.empty_like(self.weights[k - 1])
+
+        # Training loop
         for x in X:
             # Clamping `x`:
             if k > 1:
@@ -140,8 +142,3 @@ class DeepBeliefNet:
             self.weights[k - 1]   += learning_rate * (sisj0 - sisj1)
             self.biases[k - 1][0] += learning_rate * (si0 - si1)
             self.biases[k - 1][1] += learning_rate * (sj0 - sj1)
-
-
-
-
-
